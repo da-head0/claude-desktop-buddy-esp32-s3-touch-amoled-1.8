@@ -8,6 +8,8 @@
 #include <LittleFS.h>
 #include <stdarg.h>
 #include <esp_mac.h>
+#include <esp_heap_caps.h>
+#include <mbedtls/platform.h>
 #include "ble_bridge.h"
 #include "ble_hid.h"
 #include "data.h"
@@ -931,7 +933,26 @@ void drawHUD() {
   }
 }
 
+// mbedTLS SSL context (~32 KB contiguous) is the largest single
+// allocation in the system. WiFi+BLE alone leave the largest internal-
+// RAM block at ~30 KB (measured), so per-call SSL setup intermittently
+// fails with -0x7F00. Redirect mbedTLS allocations to PSRAM (8 MB
+// contiguous) so the STT HTTPS handshake stops caring about internal-
+// RAM fragmentation.
+static void* mbedtlsPsramCalloc(size_t n, size_t size) {
+  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM);
+  if (p) return p;
+  return heap_caps_calloc(n, size, MALLOC_CAP_DEFAULT);
+}
+static void mbedtlsPsramFree(void* p) {
+  heap_caps_free(p);
+}
+
 void setup() {
+  // Must run before anything that touches TLS (voice_stt HTTPS POSTs,
+  // BLE secure pairing if it ever uses mbedTLS).
+  mbedtls_platform_set_calloc_free(mbedtlsPsramCalloc, mbedtlsPsramFree);
+
   hwInit();                  // Wire + expander + display + power + input + IMU + RTC + audio
   startBt();                 // BLE stays always-on
   netInit();                 // Non-blocking WiFi STA — connection completes async
