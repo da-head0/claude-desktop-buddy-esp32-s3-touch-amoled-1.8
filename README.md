@@ -74,15 +74,16 @@ The board has two physical keys. **Key1** is the BOOT button (acts as
 "A" in the table). **Key3** is the AXP power key — short-press is "B",
 long-press toggles screen off, very-long-press hardware-shuts-down.
 
-|                          | Normal               | Pet         | Info        | Approval    |
-| ------------------------ | -------------------- | ----------- | ----------- | ----------- |
-| **Key1** (BOOT)          | next screen          | next screen | next screen | **approve** |
-| **Key3** (PWR, short)    | scroll transcript    | next page   | next page   | **deny**    |
-| **Hold Key1**            | menu                 | menu        | menu        | menu        |
-| **Key3** (PWR, ~1s long) | toggle screen off    |             |             |             |
-| **Key3** (PWR, ~6s)      | hard power off       |             |             |             |
-| **Shake**                | dizzy                |             |             | —           |
-| **Face-down**            | nap (energy refills) |             |             |             |
+|                          | Normal               | Pet         | Info        | Approval                |
+| ------------------------ | -------------------- | ----------- | ----------- | ----------------------- |
+| **Key1** (BOOT)          | next screen          | next screen | next screen | **approve**             |
+| **Key3** (PWR, short)    | scroll transcript    | next page   | next page   | **deny**                |
+| **Hold Key1** (~0.6 s)   | menu                 | menu        | menu        | menu                    |
+| **Hold Key1** (~1 s+)    | voice (push-to-talk) | voice       | voice       | —                       |
+| **Key3** (PWR, ~1s long) | toggle screen off    | toggle off  | toggle off  | toggle screen off       |
+| **Key3** (PWR, ~6s)      | hard power off       |             |             |                         |
+| **Shake**                | dizzy                |             |             | —                       |
+| **Face-down**            | nap (energy refills) |             |             |                         |
 
 Touch is supplemental — keys remain primary:
 
@@ -90,6 +91,34 @@ Touch is supplemental — keys remain primary:
 - **Menu / Settings / Reset** — tap a row to select+confirm in one go
 - **Info / Pet pages** — tap top-right corner to cycle pages
 - **Normal HUD** — tap bottom 32 px to scroll the transcript
+
+### Voice input
+
+The board advertises a BLE keyboard alongside the Hardware Buddy bridge,
+so a single LE Secure Connections bond covers both roles. Holding
+**Key1** past ~1 s emits the macOS Dictation activation
+(**Right ⌘ Command twice**); releasing emits it again. macOS treats this
+as a toggle, so dictation runs only while Key1 is held — push-to-talk.
+Whatever you say is transcribed straight into the focused text field
+(typically the Claude Desktop chat input). Voice is suppressed inside
+permission prompts and overlays — chat-input focus isn't guaranteed
+there, so the transcript would land in the wrong place.
+
+First-time setup (macOS):
+
+1. After flashing, pair the device under **System Settings →
+   Bluetooth** — it shows up under Keyboards. Hardware Buddy keeps
+   working over the same connection.
+2. **System Settings → Keyboard → Dictation** — enable Dictation. Set
+   **Shortcut** to **"Press Right Command twice"** (built-in dropdown
+   option, no key entry needed). Grant Speech Recognition permission on
+   first use. Requires macOS 14+.
+
+> **Why Right ⌘⌘ and not a custom shortcut?** macOS's Dictation
+> shortcut field rejects most navigation keys (PageUp etc.) and several
+> modifier+letter combos collide with Claude Desktop. The built-in
+> "Right Command twice" option avoids both — it's a one-click selection
+> in the dropdown and BLE HID can emit it as a standard modifier byte.
 
 ### Sleep & wake
 

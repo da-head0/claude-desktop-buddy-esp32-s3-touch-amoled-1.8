@@ -28,13 +28,13 @@ struct BeepReq { uint16_t freq; uint16_t dur; };
 
 static bool i2sInit() {
   i2s_config_t cfg = {};
-  cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+  cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX);
   cfg.sample_rate = AUDIO_SR;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-  cfg.dma_buf_count = 4;
+  cfg.dma_buf_count = 8;
   cfg.dma_buf_len = 256;
   cfg.use_apll = false;
   cfg.tx_desc_auto_clear = true;
@@ -48,7 +48,7 @@ static bool i2sInit() {
   pins.bck_io_num   = PIN_I2S_BCLK;
   pins.ws_io_num    = PIN_I2S_WS;
   pins.data_out_num = PIN_I2S_DO;
-  pins.data_in_num  = I2S_PIN_NO_CHANGE;
+  pins.data_in_num  = PIN_I2S_DI;
   if (i2s_set_pin(I2S_NUM_0, &pins) != ESP_OK) return false;
   return true;
 }
@@ -65,7 +65,9 @@ static bool es8311CodecInit() {
   };
   if (es8311_init(h, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) return false;
   if (es8311_sample_frequency_config(h, clk.mclk_frequency, clk.sample_frequency) != ESP_OK) return false;
+  // Analog MEMS mic on the Waveshare board (false = analog, true = PDM digital).
   es8311_microphone_config(h, false);
+  es8311_microphone_gain_set(h, ES8311_MIC_GAIN_24DB);
   es8311_voice_volume_set(h, AUDIO_VOL, nullptr);
   return true;
 }
@@ -108,4 +110,33 @@ void hwBeep(uint16_t freqHz, uint16_t durMs) {
   if (!s_beepQ) return;
   BeepReq r{ freqHz, durMs };
   xQueueSend(s_beepQ, &r, 0);
+}
+
+// --- Mic capture ---------------------------------------------------------
+
+static volatile bool s_micActive = false;
+
+bool hwAudioMicStart() {
+  // Drain stale samples that accumulated in the RX DMA between captures
+  // so the first read returns fresh audio.
+  uint8_t scratch[256];
+  size_t br;
+  while (i2s_read(I2S_NUM_0, scratch, sizeof(scratch), &br, 0) == ESP_OK
+         && br > 0) {}
+  s_micActive = true;
+  return true;
+}
+
+bool hwAudioMicStop() {
+  s_micActive = false;
+  return true;
+}
+
+int hwAudioMicRead(int16_t* buf, size_t nSamples, uint32_t timeoutMs) {
+  if (!s_micActive || !buf || nSamples == 0) return -1;
+  size_t br = 0;
+  esp_err_t e = i2s_read(I2S_NUM_0, buf, nSamples * sizeof(int16_t),
+                         &br, pdMS_TO_TICKS(timeoutMs));
+  if (e != ESP_OK) return -1;
+  return (int)(br / sizeof(int16_t));
 }

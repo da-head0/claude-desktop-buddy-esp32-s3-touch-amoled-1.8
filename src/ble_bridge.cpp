@@ -1,4 +1,5 @@
 #include "ble_bridge.h"
+#include "ble_hid.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -116,6 +117,11 @@ void bleInit(const char* deviceName) {
   rxChar->setCallbacks(new RxCallbacks());
 
   svc->start();
+
+  // Attach HID keyboard alongside NUS — same BLEServer, same LE Secure
+  // Connections bond covers both. main.cpp uses this to inject the
+  // macOS Dictation activation (Right ⌘ Command twice) on Key1 long-press.
+  bleHidAttach(server, BLEDevice::getAdvertising());
 
   BLESecurity* sec = new BLESecurity();
   sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);

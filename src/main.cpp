@@ -9,8 +9,11 @@
 #include <stdarg.h>
 #include <esp_mac.h>
 #include "ble_bridge.h"
+#include "ble_hid.h"
 #include "data.h"
 #include "buddy.h"
+#include "net.h"
+#include "voice_stt.h"
 
 // TFT_eSPI used to define these named colors; Arduino_GFX uses
 // RGB565_*. Keep the names so existing UI code compiles unchanged.
@@ -63,6 +66,15 @@ bool    menuOpen    = false;
 uint8_t menuSel     = 0;
 uint8_t brightLevel = 4;           // 0..4 → ScreenBreath 20..100
 bool    btnALong    = false;
+
+// Voice (HID dictation tap) — Key1 hold past VOICE_HOLD_MS fires a
+// Right ⌘ Command double-tap to toggle macOS Dictation on; release fires
+// it again to toggle off. Suppressed in permission prompts and overlays.
+// voiceFiredKey1 latches for one press cycle so the start tap doesn't
+// repeat every loop while the button is held.
+const uint32_t BTN_A_MENU_HOLD_MS  = 600;    // release window: menu toggle
+const uint32_t BTN_A_VOICE_HOLD_MS = 1000;   // press cross: voice start
+bool voiceFiredKey1 = false;
 
 enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_INFO, DISP_COUNT };
 uint8_t displayMode = DISP_NORMAL;
@@ -922,6 +934,8 @@ void drawHUD() {
 void setup() {
   hwInit();                  // Wire + expander + display + power + input + IMU + RTC + audio
   startBt();                 // BLE stays always-on
+  netInit();                 // Non-blocking WiFi STA — connection completes async
+  voiceSttInit();            // Pre-allocate 960 KB PSRAM capture buffer
   applyBrightness();
   lastInteractMs = millis();
   statsLoad();
@@ -1019,10 +1033,7 @@ void loop() {
     wake();
   }
 
-  // Key3 long-press (~1s, AXP IRQ 0x04) toggles screen off — replaces
-  // M5StickC's PWR short-press behaviour (we only have 2 buttons; short
-  // press of Key3 is BtnB, so screen-toggle moves to long-press).
-  // Very-long-press (6s) still powers off via AXP hardware.
+  // Key3 long-press (~1s, AXP IRQ 0x04): toggle screen off / wake.
   if (hwAxpBtnEvent() == 0x04) {
     if (screenOff) {
       wake();
@@ -1032,19 +1043,55 @@ void loop() {
     }
   }
 
-  if (hwBtnA().pressedFor(600) && !btnALong && !swallowBtnA) {
-    btnALong = true;
-    beep(800, 60);
-    if (resetOpen) { resetOpen = false; }
-    else if (settingsOpen) { settingsOpen = false; characterInvalidate(); }
-    else {
-      menuOpen = !menuOpen;
-      menuSel = 0;
-      if (!menuOpen) characterInvalidate();
+  // Key1 voice trigger (press-cross at BTN_A_VOICE_HOLD_MS). Push-to-talk:
+  // start a board-side mic capture on cross; on release, ship the buffer
+  // to the STT Lambda and type the transcript via Unicode Hex Input HID.
+  // Suppressed inside permission prompts (chat input focus isn't
+  // guaranteed there) and inside menu/settings/reset overlays.
+  if (hwBtnA().pressedFor(BTN_A_VOICE_HOLD_MS) && !voiceFiredKey1
+      && !btnALong && !swallowBtnA && bleHidReady()
+      && !inPrompt && !menuOpen && !settingsOpen && !resetOpen) {
+    if (voiceSttBegin()) {
+      beep(2200, 80);
+      voiceFiredKey1 = true;
     }
-    Serial.println(menuOpen ? "menu open" : "menu close");
   }
+
+  // Drain mic samples into the PSRAM buffer while Key1 is held.
+  if (voiceFiredKey1) voiceSttPump();
+
   if (hwBtnA().wasReleased) {
+    uint32_t heldMs = hwBtnA().pressedAt
+                    ? (millis() - hwBtnA().pressedAt) : 0;
+    bool wasVoice = voiceFiredKey1;
+    voiceFiredKey1 = false;
+
+    if (wasVoice) {
+      // Synchronous round-trip: stop mic → POST PCM → parse JSON →
+      // type the result via Unicode Hex Input. Blocks the UI loop for
+      // ~1–6 s depending on network and transcript length.
+      int n = voiceSttEnd();
+      if (n > 0) bleHidTypeUtf8(voiceSttResult());
+      btnALong = true;  // suppress short-press fall-through below
+    }
+
+    // Release-driven menu (600 .. BTN_A_VOICE_HOLD_MS window). Only fires
+    // when the user released *before* voice would have triggered, so
+    // holding for voice doesn't also flash the menu.
+    if (!wasVoice && !swallowBtnA
+        && heldMs >= BTN_A_MENU_HOLD_MS && heldMs < BTN_A_VOICE_HOLD_MS) {
+      btnALong = true;
+      beep(800, 60);
+      if (resetOpen) { resetOpen = false; }
+      else if (settingsOpen) { settingsOpen = false; characterInvalidate(); }
+      else {
+        menuOpen = !menuOpen;
+        menuSel = 0;
+        if (!menuOpen) characterInvalidate();
+      }
+      Serial.println(menuOpen ? "menu open" : "menu close");
+    }
+
     if (!btnALong && !swallowBtnA) {
       if (inPrompt) {
         char cmd[96];
