@@ -130,13 +130,16 @@ of the full pipeline lives at
    `Option + four hex digits` (e.g. `'안' = U+C548 → Option+C548`); the
    Unicode Hex Input layout is what turns those keystrokes into glyphs.
 
-3. **Wire `F24` to toggle into Unicode Hex Input.** The firmware sends
-   `F24` once at the start of each capture (switch to UHI) and once at
-   the end (switch back). Two ways to wire it:
+3. **Wire `F24` and `F23` to frame Unicode Hex Input.** The firmware
+   sends `F24` at the start of each capture (switch *into* UHI) and
+   `F23` at the end (switch *back* to your primary layout). Both are
+   one-way idempotent — sending `F24` while already in UHI is a no-op,
+   so PTT works regardless of the input source state when you start.
+   Two ways to wire them:
 
    - **Karabiner-Elements (recommended, file-based, multi-language safe):**
-     Install Karabiner-Elements, then drop in the rule shipped with this
-     repo:
+     Install Karabiner-Elements, then drop in the rules shipped with
+     this repo:
 
      ```bash
      cp tools/macos_setup/karabiner.json \
@@ -144,16 +147,19 @@ of the full pipeline lives at
      ```
 
      Then **Karabiner Settings → Complex Modifications → Add rule** →
-     enable `Claude Buddy — F24 toggles Unicode Hex Input`. The rule
-     toggles between Unicode Hex Input and **Korean** by default; change
-     `language` in the JSON to `en` (or any input-source ID) if your
-     primary layout is different.
+     enable both `F24 unconditionally selects Unicode Hex Input` and
+     `F23 unconditionally selects the user's primary layout`. F23 is
+     wired to **Korean** by default; change `language` in the JSON to
+     `en` (or any input-source ID) if your primary layout is different.
 
-   - **macOS native (simpler, single-direction):** **System Settings →
-     Keyboard → Keyboard Shortcuts → Input Sources** → assign **F24** to
-     `Select the previous input source`. This works as a toggle as long
-     as Unicode Hex Input was the most recently used source — flip to it
-     manually once and the toggle behaves from there.
+   - **macOS native (Sequoia 15+, no third-party tool):** **System
+     Settings → Keyboard → Keyboard Shortcuts → Input Sources**. Scroll
+     past the two cycle entries to the per-source list at the bottom —
+     each enabled input source has its own shortcut field. Assign
+     **F24** to `Unicode Hex Input` and **F23** to your primary layout
+     (e.g. `Korean - 2-Set Korean`). The earlier `Select the previous
+     input source` advice is **broken** for this flow — it's a stateful
+     toggle, so PTT-while-already-in-UHI takes you the wrong way.
 
 #### First-time setup — board side
 

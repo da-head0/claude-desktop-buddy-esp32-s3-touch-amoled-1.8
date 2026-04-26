@@ -1,0 +1,37 @@
+{
+  "title": "Claude Buddy — F24/F23 frame Unicode Hex Input",
+  "rules": [
+    {
+      "description": "F24 unconditionally selects Unicode Hex Input. Sent by the firmware at the start of each PTT capture so the board can type Hangul as Option+hex regardless of what input source the user was in. Idempotent (no-op if already in UHI).",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "f24" },
+          "to": [
+            {
+              "select_input_source": {
+                "input_source_id": "com.apple.keylayout.UnicodeHexInput"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "F23 unconditionally selects the user's primary layout (Korean by default; change `language` to `en` etc. for other defaults). Sent by the firmware at the end of each PTT capture so the host returns from UHI even if PTT started while already in UHI.",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "f23" },
+          "to": [
+            {
+              "select_input_source": {
+                "language": "ko"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

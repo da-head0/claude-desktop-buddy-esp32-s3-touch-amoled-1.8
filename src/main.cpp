@@ -1126,9 +1126,11 @@ void loop() {
       && !inPrompt && !menuOpen && !settingsOpen && !resetOpen) {
     if (voiceSttBegin()) {
       beep(2200, 80);
-      // Toggle macOS to Unicode Hex Input via the user-assigned F24
-      // shortcut (System Settings → Keyboard → Input Sources → Select
-      // Unicode Hex Input). Paired with the toggle-back below.
+      // F24 unconditionally selects Unicode Hex Input on the host so
+      // the board can type Hangul as Option+hex sequences. The
+      // matching unconditional return-to-primary fires after capture
+      // (F23 below). Idempotent on both ends — the user can start a
+      // PTT from any input source state.
       bleHidTap(0, HID_KEY_F24);
       voiceFiredKey1 = true;
     }
@@ -1147,9 +1149,10 @@ void loop() {
       // ~1–6 s depending on network and transcript length.
       int n = voiceSttEnd();
       if (n > 0) bleHidTypeUtf8(voiceSttResult());
-      // Toggle back unconditionally so the input source is restored
-      // even when capture was too short / network failed / no text.
-      bleHidTap(0, HID_KEY_F24);
+      // F23 unconditionally selects the user's primary layout (e.g.
+      // Korean). Always sent — even when capture was too short / net
+      // failed / no text — so the host doesn't get stranded in UHI.
+      bleHidTap(0, HID_KEY_F23);
       btnALong = true;  // suppress short-press fall-through below
     }
 

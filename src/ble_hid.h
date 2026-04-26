@@ -51,4 +51,9 @@ static const uint8_t HID_MOD_RGUI   = 0x80;   // Right Cmd on macOS
 // A few keycodes for occasional use; most flows use the modifier-only
 // double-tap above.
 static const uint8_t HID_KEY_F13 = 0x68;
+// F23/F24 frame the PTT capture: F24 always selects Unicode Hex Input
+// (so the board can type Option+hex Hangul) and F23 always selects the
+// user's primary layout afterward. Two keys instead of one toggle so
+// the result is independent of the input-source state when PTT begins.
+static const uint8_t HID_KEY_F23 = 0x72;
 static const uint8_t HID_KEY_F24 = 0x73;
