@@ -114,6 +114,21 @@ int voiceSttEnd() {
     return -3;
   }
 
+  // WiFi is brought up at wake() and torn down at screen-off, so it's
+  // usually associated by the time we get here. Cold path: user PTTs
+  // immediately after wake → STA hasn't finished DHCP → block briefly.
+  // Audio is already fully captured into PSRAM; only the upload waits.
+  uint32_t waitT0 = millis();
+  if (!netWaitReady(8000)) {
+    Serial.printf("[stt] WiFi not ready after %ums, abort POST\n",
+                  (unsigned)(millis() - waitT0));
+    return -1;
+  }
+  uint32_t waitMs = millis() - waitT0;
+  if (waitMs > 100) {
+    Serial.printf("[stt] WiFi ready after %ums\n", (unsigned)waitMs);
+  }
+
   static char respBuf[2048];
   s_transcribing = true;
   int rc = netHttpsPost(STT_ENDPOINT_URL,

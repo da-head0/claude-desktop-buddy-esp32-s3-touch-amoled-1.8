@@ -161,6 +161,11 @@ static void wake() {
     wakeTransitionUntil = millis() + 12000;
   }
   if (dimmed) { applyBrightness(); dimmed = false; }
+  // WiFi lifetime tracks screen-on lifetime: any user activity that
+  // wakes the screen also kicks off STA association so a follow-up
+  // PTT (typically a few seconds later) finds WiFi already up. Idle
+  // → screen off → netStop() (below in loop()) cuts the radio.
+  netStart();
 }
 bool     responseSent = false;
 
@@ -963,7 +968,7 @@ void setup() {
 
   hwInit();                  // Wire + expander + display + power + input + IMU + RTC + audio
   startBt();                 // BLE stays always-on
-  netInit();                 // Non-blocking WiFi STA — connection completes async
+  netInit();                 // Register WiFi event handlers — radio stays off
   voiceSttInit();            // Pre-allocate 960 KB PSRAM capture buffer
   applyBrightness();
   lastInteractMs = millis();
@@ -1004,6 +1009,11 @@ void setup() {
   hwInputUpdate();
   (void)hwAxpBtnEvent();
   (void)hwAxpReleasePulse();
+
+  // Boot is the first "screen on" event — mirror what wake() does so
+  // WiFi is already racing toward STA_GOT_IP by the time the user
+  // could plausibly trigger their first PTT.
+  netStart();
 
   Serial.printf("buddy: %s\n", buddyMode ? "ASCII mode" : "GIF character loaded");
 }
@@ -1089,6 +1099,7 @@ void loop() {
       } else {
         hwDisplaySleep(true);
         screenOff = true;
+        netStop();
       }
     } else {
       // 1–3s → menu toggle. Mirrors the previous Key1 release-window UX.
@@ -1445,6 +1456,7 @@ void loop() {
     if (idleMs > threshold) {
       hwDisplaySleep(true);
       screenOff = true;
+      netStop();
     }
   }
 

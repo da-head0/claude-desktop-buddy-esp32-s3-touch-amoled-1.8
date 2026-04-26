@@ -2,12 +2,31 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Brings up WiFi STA in the background using credentials from
-// `src/secrets.h` (WIFI_SSID / WIFI_PSK). Non-blocking — connection
-// status surfaces via netReady() and serial logs. Safe to call when
-// secrets.h is missing or empty: WiFi is simply skipped.
+// Register WiFi event handlers and stash credentials. Does NOT touch
+// the radio — call netStart() when you actually want WiFi up. Safe
+// when secrets.h is missing or empty: every other net*() call becomes
+// a silent no-op.
 void netInit();
+
+// Bring up STA mode and start associating with the configured SSID.
+// Idempotent — safe to call repeatedly when already started or
+// connecting. Async: connection completes in the background; check
+// netReady() or call netWaitReady().
+void netStart();
+
+// Disconnect and fully power down the WiFi radio. Idempotent. Caller
+// is expected to pair this with netStart() based on UI activity (e.g.
+// keep WiFi on only while the screen is on).
+void netStop();
+
+// True iff currently associated and DHCP-good.
 bool netReady();
+
+// Block up to timeoutMs (in 50 ms slices) waiting for netReady().
+// Auto-calls netStart() if the radio is currently off, so callers
+// don't need to remember whether they started it. Returns true on
+// connection, false on timeout.
+bool netWaitReady(uint32_t timeoutMs);
 
 // Synchronous HTTPS POST. Body is opaque bytes (binary-safe). The
 // response body is copied into outResp (NUL-terminated, truncated to

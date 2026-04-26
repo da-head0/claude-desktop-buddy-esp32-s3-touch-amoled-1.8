@@ -14,9 +14,14 @@
   #define WIFI_PSK ""
 #endif
 
+// Tracks whether the radio has been brought up via netStart(). Lets
+// netStart()/netStop() be idempotent and lets netWaitReady() lazily
+// auto-start when a caller (e.g. voiceSttEnd) skipped it.
+static bool s_started = false;
+
 void netInit() {
   if (!WIFI_SSID[0]) {
-    Serial.println("[net] WIFI_SSID empty — skipping WiFi (set src/secrets.h)");
+    Serial.println("[net] WIFI_SSID empty — every net* call will no-op (set src/secrets.h)");
     return;
   }
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -54,14 +59,46 @@ void netInit() {
         break;
     }
   });
+  // Keep credentials in RAM only; a deliberate netStop()/netStart()
+  // cycle relies on the cached SSID/PSK rather than NVS reads.
   WiFi.persistent(false);
+}
+
+void netStart() {
+  if (s_started) return;
+  if (!WIFI_SSID[0]) return;
   WiFi.mode(WIFI_STA);
+  // AutoReconnect is harmless once the radio is fully off (mode OFF
+  // suspends the STA state machine), so we leave it on for the run
+  // between netStart() and netStop().
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PSK);
-  Serial.printf("[net] connecting ssid=%s\n", WIFI_SSID);
+  s_started = true;
+  Serial.printf("[net] start (ssid=%s)\n", WIFI_SSID);
+}
+
+void netStop() {
+  if (!s_started) return;
+  // disconnect(false) tears down the association without erasing the
+  // cached credentials; mode(WIFI_OFF) powers the radio down so the
+  // big draw is gone until the next netStart().
+  WiFi.disconnect(false);
+  WiFi.mode(WIFI_OFF);
+  s_started = false;
+  Serial.println("[net] stop");
 }
 
 bool netReady() {
+  return WiFi.status() == WL_CONNECTED;
+}
+
+bool netWaitReady(uint32_t timeoutMs) {
+  if (!s_started) netStart();   // lenient: caller may have forgotten
+  uint32_t deadline = millis() + timeoutMs;
+  while ((int32_t)(millis() - deadline) < 0) {
+    if (WiFi.status() == WL_CONNECTED) return true;
+    delay(50);
+  }
   return WiFi.status() == WL_CONNECTED;
 }
 
