@@ -54,7 +54,7 @@ pio run -e waveshare-amoled -t erase && pio run -e waveshare-amoled -t upload
 LittleFS auto-formats on first boot if the partition isn't recognised.
 
 Once running you can also wipe everything from the device itself:
-**hold Key1 → settings → reset → factory reset → tap twice**.
+**hold Key3 → settings → reset → factory reset → tap twice**.
 
 ## Pairing
 
@@ -72,16 +72,17 @@ auto-reconnects whenever both sides are awake.
 
 The board has two physical keys. **Key1** is the BOOT button (acts as
 "A" in the table). **Key3** is the AXP power key — short-press is "B",
-long-press toggles screen off, very-long-press hardware-shuts-down.
+holding 1 s opens the menu, holding 3 s toggles screen off, holding
+6 s hardware-shuts-down.
 
 |                          | Normal               | Pet         | Info        | Approval                |
 | ------------------------ | -------------------- | ----------- | ----------- | ----------------------- |
 | **Key1** (BOOT)          | next screen          | next screen | next screen | **approve**             |
 | **Key3** (PWR, short)    | scroll transcript    | next page   | next page   | **deny**                |
-| **Hold Key1** (~0.6 s)   | menu                 | menu        | menu        | menu                    |
 | **Hold Key1** (~1 s+)    | voice (push-to-talk) | voice       | voice       | —                       |
-| **Key3** (PWR, ~1s long) | toggle screen off    | toggle off  | toggle off  | toggle screen off       |
-| **Key3** (PWR, ~6s)      | hard power off       |             |             |                         |
+| **Hold Key3** (1–3 s)    | menu                 | menu        | menu        | menu                    |
+| **Hold Key3** (~3 s+)    | toggle screen off    | toggle off  | toggle off  | toggle screen off       |
+| **Hold Key3** (~6 s+)    | hard power off       |             |             |                         |
 | **Shake**                | dizzy                |             |             | —                       |
 | **Face-down**            | nap (energy refills) |             |             |                         |
 
@@ -92,33 +93,90 @@ Touch is supplemental — keys remain primary:
 - **Info / Pet pages** — tap top-right corner to cycle pages
 - **Normal HUD** — tap bottom 32 px to scroll the transcript
 
-### Voice input
+### Voice input (push-to-talk)
 
 The board advertises a BLE keyboard alongside the Hardware Buddy bridge,
 so a single LE Secure Connections bond covers both roles. Holding
-**Key1** past ~1 s emits the macOS Dictation activation
-(**Right ⌘ Command twice**); releasing emits it again. macOS treats this
-as a toggle, so dictation runs only while Key1 is held — push-to-talk.
-Whatever you say is transcribed straight into the focused text field
-(typically the Claude Desktop chat input). Voice is suppressed inside
-permission prompts and overlays — chat-input focus isn't guaranteed
-there, so the transcript would land in the wrong place.
+**Key1** past ~1 s starts capturing audio from the on-board ES8311
+microphone; releasing ships the buffer to AWS Transcribe and types the
+result back into the focused text field via BLE HID. Push-to-talk —
+recording runs only while Key1 is held. Voice is suppressed inside
+permission prompts and overlays (chat-input focus isn't guaranteed
+there, so the transcript would land in the wrong place).
 
-First-time setup (macOS):
+```
+[Key1 hold] → mic → PSRAM → HTTPS → AWS Lambda → Transcribe (ko-KR)
+                                                     ↓
+[Mac input]  ← BLE HID Unicode Hex Input  ← {"text":"..."}
+```
 
-1. After flashing, pair the device under **System Settings →
-   Bluetooth** — it shows up under Keyboards. Hardware Buddy keeps
-   working over the same connection.
-2. **System Settings → Keyboard → Dictation** — enable Dictation. Set
-   **Shortcut** to **"Press Right Command twice"** (built-in dropdown
-   option, no key entry needed). Grant Speech Recognition permission on
-   first use. Requires macOS 14+.
+The board talks to AWS directly over Wi-Fi, so the host Mac doesn't need
+to be on the same network — it only needs to be BLE-paired. (A walkthrough
+of the full pipeline lives at
+[`.claude/voice-input-hid/Voice PTT 동작 원리.html`](.claude/voice-input-hid/Voice%20PTT%20%EB%8F%99%EC%9E%91%20%EC%9B%90%EB%A6%AC.html)
+— open it in a browser.)
 
-> **Why Right ⌘⌘ and not a custom shortcut?** macOS's Dictation
-> shortcut field rejects most navigation keys (PageUp etc.) and several
-> modifier+letter combos collide with Claude Desktop. The built-in
-> "Right Command twice" option avoids both — it's a one-click selection
-> in the dropdown and BLE HID can emit it as a standard modifier byte.
+#### First-time setup — Mac side
+
+1. **Pair the BLE device.** **System Settings → Bluetooth** → the board
+   advertises as `Claude-XXXX` under Keyboards. Skip the Keyboard Setup
+   Assistant if it pops up (the board has no letter keys, so layout
+   detection fails harmlessly — defaults to ANSI). Hardware Buddy
+   continues to work over the same connection.
+
+2. **Add Unicode Hex Input as an input source.** **System Settings →
+   Keyboard → Text Input → Input Sources → +** → Others → **Unicode Hex
+   Input**. The board encodes each Hangul / Latin / symbol codepoint as
+   `Option + four hex digits` (e.g. `'안' = U+C548 → Option+C548`); the
+   Unicode Hex Input layout is what turns those keystrokes into glyphs.
+
+3. **Wire `F24` to toggle into Unicode Hex Input.** The firmware sends
+   `F24` once at the start of each capture (switch to UHI) and once at
+   the end (switch back). Two ways to wire it:
+
+   - **Karabiner-Elements (recommended, file-based, multi-language safe):**
+     Install Karabiner-Elements, then drop in the rule shipped with this
+     repo:
+
+     ```bash
+     cp tools/macos_setup/karabiner.json \
+        ~/.config/karabiner/assets/complex_modifications/claude-buddy.json
+     ```
+
+     Then **Karabiner Settings → Complex Modifications → Add rule** →
+     enable `Claude Buddy — F24 toggles Unicode Hex Input`. The rule
+     toggles between Unicode Hex Input and **Korean** by default; change
+     `language` in the JSON to `en` (or any input-source ID) if your
+     primary layout is different.
+
+   - **macOS native (simpler, single-direction):** **System Settings →
+     Keyboard → Keyboard Shortcuts → Input Sources** → assign **F24** to
+     `Select the previous input source`. This works as a toggle as long
+     as Unicode Hex Input was the most recently used source — flip to it
+     manually once and the toggle behaves from there.
+
+#### First-time setup — board side
+
+1. **Provide Wi-Fi + STT credentials.** Copy `src/secrets.example.h` →
+   `src/secrets.h` and fill in `WIFI_SSID`, `WIFI_PSK`,
+   `STT_ENDPOINT_URL`, and `STT_API_KEY`. The file is gitignored.
+
+2. **Deploy the Lambda backend** (one-time; skip if you've been handed
+   an existing endpoint). The Lambda receives raw PCM and proxies to
+   AWS Transcribe Streaming. See
+   [`tools/lambda_transcribe/README.md`](tools/lambda_transcribe/README.md)
+   for the deploy script and AWS prerequisites — `./deploy.sh` is
+   idempotent and writes the resulting endpoint + API key into
+   `tools/lambda_transcribe/.api_key` for you to paste into `secrets.h`.
+
+3. **Flash and reboot.** `pio run -e waveshare-amoled -t upload`.
+
+> **Why Unicode Hex Input and not Korean IME?** macOS's two-set Hangul
+> IME is a jamo-composition engine — typing `'안'` programmatically would
+> require knowing the user's keyboard layout (두벌식 vs 세벌식 vs 천지인)
+> and emitting jamo sequences. Unicode Hex Input is layout-independent:
+> any BMP codepoint becomes the same `Option + 4 hex` keystrokes,
+> covering Hangul, Latin, CJK, and symbols uniformly.
 
 ### Sleep & wake
 

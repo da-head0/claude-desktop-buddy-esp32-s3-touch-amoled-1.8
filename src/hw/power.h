@@ -19,3 +19,6 @@ void hwPowerOff();
 // don't match the XPOWERS_PWR_BTN_* enum values.
 bool hwAxpPekeyShortPress();
 bool hwAxpPekeyLongPress();
+// PEK negedge — fires once when the user releases the power key.
+// Used to differentiate hold durations after a LONG IRQ has armed.
+bool hwAxpPekeyNegative();

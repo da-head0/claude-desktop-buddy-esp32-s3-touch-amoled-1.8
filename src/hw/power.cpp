@@ -20,7 +20,9 @@ bool hwPowerInit() {
   // AXP2101::enableIRQ() takes chip-specific bit positions, not the
   // cross-chip XPOWERS_PWR_BTN_* enums (which would write the wrong
   // INTEN register).
-  s_pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ | XPOWERS_AXP2101_PKEY_LONG_IRQ);
+  s_pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ
+                | XPOWERS_AXP2101_PKEY_LONG_IRQ
+                | XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ);
   s_pmu.clearIrqStatus();
   return true;
 }
@@ -54,6 +56,13 @@ bool hwAxpPekeyShortPress() {
 bool hwAxpPekeyLongPress() {
   s_pmu.getIrqStatus();
   bool hit = s_pmu.isPekeyLongPressIrq();
+  if (hit) s_pmu.clearIrqStatus();
+  return hit;
+}
+
+bool hwAxpPekeyNegative() {
+  s_pmu.getIrqStatus();
+  bool hit = s_pmu.isPekeyNegativeIrq();
   if (hit) s_pmu.clearIrqStatus();
   return hit;
 }

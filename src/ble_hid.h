@@ -51,3 +51,4 @@ static const uint8_t HID_MOD_RGUI   = 0x80;   // Right Cmd on macOS
 // A few keycodes for occasional use; most flows use the modifier-only
 // double-tap above.
 static const uint8_t HID_KEY_F13 = 0x68;
+static const uint8_t HID_KEY_F24 = 0x73;

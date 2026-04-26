@@ -74,9 +74,16 @@ bool    btnALong    = false;
 // it again to toggle off. Suppressed in permission prompts and overlays.
 // voiceFiredKey1 latches for one press cycle so the start tap doesn't
 // repeat every loop while the button is held.
-const uint32_t BTN_A_MENU_HOLD_MS  = 600;    // release window: menu toggle
 const uint32_t BTN_A_VOICE_HOLD_MS = 1000;   // press cross: voice start
 bool voiceFiredKey1 = false;
+
+// Key3 (AXP power key) two-stage long-press: AXP fires LONG_IRQ at the
+// default 1s threshold which only arms intent. Final action waits for
+// the negedge (release): hold ≥ KEY3_SCREEN_HOLD_MS past the 1s arm
+// (≈3s total) → screen toggle, otherwise → menu toggle. AXP itself
+// kills power around 6s, so very-long press still hard-shuts-down.
+static uint32_t key3LongAtMs = 0;            // 0 = no active long-press arm
+const uint32_t  KEY3_SCREEN_HOLD_MS = 2000;  // ms past LONG_IRQ → screen toggle
 
 enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_INFO, DISP_COUNT };
 uint8_t displayMode = DISP_NORMAL;
@@ -543,10 +550,11 @@ void drawInfo() {
     spr.setTextColor(p.textDim, p.bg); ln("    next page");
     ln("    deny prompt"); y += 4;
     spr.setTextColor(p.text, p.bg);    ln("hold A");
-    spr.setTextColor(p.textDim, p.bg); ln("    menu"); y += 4;
+    spr.setTextColor(p.textDim, p.bg); ln("    voice"); y += 4;
     spr.setTextColor(p.text, p.bg);    ln("Power  left side");
-    spr.setTextColor(p.textDim, p.bg); ln("    tap = screen off");
-    ln("    hold 6s = off");
+    spr.setTextColor(p.textDim, p.bg); ln("    1s hold = menu");
+    ln("    3s hold = off");
+    ln("    6s hold = power");
 
   } else if (infoPage == 2) {
     _infoHeader(p, y, "CLAUDE", infoPage);
@@ -845,8 +853,8 @@ static void drawPetHowTo(const Palette& p) {
   ln(p.textDim, "idle 30s = off");
   ln(p.textDim, "any button = wake"); gap();
 
-  ln(p.textDim, "A: screens  B: page");
-  ln(p.textDim, "hold A: menu");
+  ln(p.textDim, "A=next  B=page");
+  ln(p.textDim, "A=voice  Pwr=menu");
 }
 
 void drawPet() {
@@ -988,6 +996,15 @@ void setup() {
     delay(1800);
   }
 
+  // The Key3 power-on press is usually held past the 1s LONG threshold
+  // before splash finishes. AXP latches a LONG_IRQ that hwPowerInit's
+  // earlier clearIrqStatus already missed. Drain anything pending here
+  // so loop() doesn't interpret the boot hold as a user gesture (which
+  // previously turned the screen back off the moment splash exited).
+  hwInputUpdate();
+  (void)hwAxpBtnEvent();
+  (void)hwAxpReleasePulse();
+
   Serial.printf("buddy: %s\n", buddyMode ? "ASCII mode" : "GIF character loaded");
 }
 
@@ -1054,13 +1071,37 @@ void loop() {
     wake();
   }
 
-  // Key3 long-press (~1s, AXP IRQ 0x04): toggle screen off / wake.
+  // Key3 long-press: AXP fires LONG_IRQ at ~1s — arm intent here, then
+  // wait for the release pulse to pick the action by total hold time.
   if (hwAxpBtnEvent() == 0x04) {
-    if (screenOff) {
-      wake();
+    key3LongAtMs = millis();
+  }
+
+  if (hwAxpReleasePulse() && key3LongAtMs) {
+    uint32_t elapsed = millis() - key3LongAtMs;
+    key3LongAtMs = 0;
+
+    if (elapsed >= KEY3_SCREEN_HOLD_MS) {
+      // ≥3s total hold → toggle screen (the original ≥1s behavior, now
+      // moved to a deliberate longer hold so 1–3s can mean "menu").
+      if (screenOff) {
+        wake();
+      } else {
+        hwDisplaySleep(true);
+        screenOff = true;
+      }
     } else {
-      hwDisplaySleep(true);
-      screenOff = true;
+      // 1–3s → menu toggle. Mirrors the previous Key1 release-window UX.
+      if (screenOff) wake();
+      if (resetOpen) { resetOpen = false; }
+      else if (settingsOpen) { settingsOpen = false; characterInvalidate(); }
+      else {
+        menuOpen = !menuOpen;
+        menuSel = 0;
+        if (!menuOpen) characterInvalidate();
+      }
+      beep(800, 60);
+      Serial.println(menuOpen ? "menu open (key3)" : "menu close (key3)");
     }
   }
 
@@ -1074,6 +1115,10 @@ void loop() {
       && !inPrompt && !menuOpen && !settingsOpen && !resetOpen) {
     if (voiceSttBegin()) {
       beep(2200, 80);
+      // Toggle macOS to Unicode Hex Input via the user-assigned F24
+      // shortcut (System Settings → Keyboard → Input Sources → Select
+      // Unicode Hex Input). Paired with the toggle-back below.
+      bleHidTap(0, HID_KEY_F24);
       voiceFiredKey1 = true;
     }
   }
@@ -1082,8 +1127,6 @@ void loop() {
   if (voiceFiredKey1) voiceSttPump();
 
   if (hwBtnA().wasReleased) {
-    uint32_t heldMs = hwBtnA().pressedAt
-                    ? (millis() - hwBtnA().pressedAt) : 0;
     bool wasVoice = voiceFiredKey1;
     voiceFiredKey1 = false;
 
@@ -1093,24 +1136,10 @@ void loop() {
       // ~1–6 s depending on network and transcript length.
       int n = voiceSttEnd();
       if (n > 0) bleHidTypeUtf8(voiceSttResult());
+      // Toggle back unconditionally so the input source is restored
+      // even when capture was too short / network failed / no text.
+      bleHidTap(0, HID_KEY_F24);
       btnALong = true;  // suppress short-press fall-through below
-    }
-
-    // Release-driven menu (600 .. BTN_A_VOICE_HOLD_MS window). Only fires
-    // when the user released *before* voice would have triggered, so
-    // holding for voice doesn't also flash the menu.
-    if (!wasVoice && !swallowBtnA
-        && heldMs >= BTN_A_MENU_HOLD_MS && heldMs < BTN_A_VOICE_HOLD_MS) {
-      btnALong = true;
-      beep(800, 60);
-      if (resetOpen) { resetOpen = false; }
-      else if (settingsOpen) { settingsOpen = false; characterInvalidate(); }
-      else {
-        menuOpen = !menuOpen;
-        menuSel = 0;
-        if (!menuOpen) characterInvalidate();
-      }
-      Serial.println(menuOpen ? "menu open" : "menu close");
     }
 
     if (!btnALong && !swallowBtnA) {
