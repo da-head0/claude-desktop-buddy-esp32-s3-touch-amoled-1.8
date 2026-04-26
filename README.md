@@ -12,6 +12,21 @@ This is a port of [anthropics/claude-desktop-buddy](https://github.com/anthropic
 unchanged — it pairs with the same Claude desktop apps and behaves like a
 larger-screen sibling of the M5StickC version.
 
+> **What this fork adds on top of [vthinkxie/upstream](https://github.com/vthinkxie/claude-desktop-buddy-esp32-s3-touch-amoled-1.8):**
+> - **Voice push-to-talk** — hold Key1 1 s+ → on-board mic captures audio →
+>   AWS Transcribe (ko-KR) → typed back into the focused text field via BLE
+>   HID. See [Voice input](#voice-input-push-to-talk).
+> - **Key3 long-press menu** — 1–3 s opens the menu, 3 s+ toggles screen
+>   off, 6 s+ hardware-shuts-down (replaces the upstream "Key1 release-window
+>   menu"). See [Controls](#controls).
+> - **WiFi on-demand** — Wi-Fi only runs while the screen is on, dropped
+>   automatically on idle so battery draw matches BLE-only when the device
+>   is asleep.
+> - **AWS Lambda STT proxy** at `tools/lambda_transcribe/` (idempotent
+>   deploy script + Function URL).
+> - **macOS Karabiner setup** at `tools/macos_setup/` (F24 → Unicode Hex
+>   Input, F23 → Korean — frames the BLE HID typing).
+
 > **Building your own device?** You don't need any of the code here. See
 > **[REFERENCE.md](REFERENCE.md)** for the wire protocol: Nordic UART
 > Service UUIDs, JSON schemas, and the folder push transport.
@@ -193,6 +208,11 @@ of the full pipeline lives at
 
 Any key press or screen tap wakes the panel.
 
+Wi-Fi tracks the screen lifetime — `netStart()` runs from `wake()`,
+`netStop()` runs at the screen-off transition. BLE stays connected for
+Hardware Buddy regardless. Watch the serial log for matched
+`[net] start` / `[net] stop` pairs to confirm cycling.
+
 ## Notable differences from the M5StickC original
 
 - **Display layer** — Arduino_GFX + PSRAM Canvas (was M5.Lcd / TFT_eSprite)
@@ -274,6 +294,11 @@ src/
   buddies/           — one file per species, seven anim functions each
   character.{cpp,h}  — GIF decode + render
   ble_bridge.{cpp,h} — Nordic UART service, line-buffered TX/RX
+  ble_hid.{cpp,h}    — BLE HID Boot Keyboard (voice transcript typing)
+  net.{cpp,h}        — WiFi STA lifecycle (start on wake, stop on idle)
+                       and HTTPS POST helper
+  voice_stt.{cpp,h}  — mic capture (16 kHz mono, PSRAM ring) + Lambda
+                       POST + transcript JSON parse
   data.h             — wire protocol, JSON parse, CJK matrixifier
   xfer.h             — folder push receiver
   stats.h            — NVS-backed stats, settings, owner, species choice
@@ -284,7 +309,13 @@ lib/
   Arduino_DriveBus/  — vendored FT3168 touch driver (Waveshare)
   Adafruit_XCA9554/  — vendored TCA9554 expander driver
 characters/          — example GIF character packs
-tools/               — generators and converters
+tools/
+  flash_character.py — stage a character pack to data/ and run uploadfs
+  prep_character.py  — character pack lint / preprocess
+  lambda_transcribe/ — AWS Lambda STT proxy (Function URL, ko-KR
+                       Transcribe Streaming)
+  macos_setup/       — Karabiner-Elements rules for F24/F23 input
+                       source switching
 docs/superpowers/    — design spec + implementation plan from the port
 ```
 
